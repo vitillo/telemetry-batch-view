@@ -13,10 +13,12 @@ import org.apache.hadoop.fs.Path
 import telemetry.SelfFirstClassLoader
 
 class AvroParquetWriterLike(parquetFile: Path, schema: Schema, compression: String, blockSize: Int, pageSize: Int, enableDict: Boolean, hadoopConf: Configuration) {
-  private val codec = AvroParquetWriterLike.classLoader.loadClass("org.apache.parquet.hadoop.metadata.CompressionCodecName")
+  private val classLoader = SelfFirstClassLoader(AvroParquetWriterLike.path)
+
+  private val codec = classLoader.loadClass("org.apache.parquet.hadoop.metadata.CompressionCodecName")
   private val snappy  = codec.getEnumConstants().find(_.toString.equals(compression)).get
 
-  private var cls = AvroParquetWriterLike.classLoader.loadClass("org.apache.parquet.avro.AvroParquetWriter")
+  private var cls = classLoader.loadClass("org.apache.parquet.avro.AvroParquetWriter")
   private val ctor = cls.getConstructor(classOf[Path], classOf[Schema], codec, classOf[Int], classOf[Int], classOf[Boolean], classOf[Configuration])
   private val parquetWriter = ctor.newInstance(parquetFile, schema, snappy, Int.box(blockSize), Int.box(pageSize), Boolean.box(enableDict), hadoopConf)
 
@@ -36,7 +38,6 @@ class AvroParquetWriterLike(parquetFile: Path, schema: Schema, compression: Stri
 object AvroParquetWriterLike{
   private val conf = ConfigFactory.load()
   private val path = conf.getString("app.jarDirectory")
-  private val classLoader = SelfFirstClassLoader(path)
 
   private val hadoopConf = new Configuration()
   private val blockSize = 128 * 1024 * 1024

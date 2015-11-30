@@ -12,13 +12,18 @@ The converted datasets are stored in the bucket specified in [*application.conf*
 
 See the [streams](https://github.com/vitillo/telemetry-parquet/blob/master/src/main/scala/streams) folder for the currently defined datasets.
 
-### Execution
+### Local execution
 Given a subtype of `DerivedStream` of type `MyStream`, a dataset for e.g. the 28th of October can be generated with:
 ```
 sbt "run-main telemetry.DerivedStream --from-date 20151028 --to-date 20151028 MyStream"
 ```
 
-### Building an Uber JAR
+### Distributed execution 
+Build an uber-jar with:
 ```
 sbt assembly
+```
+then, submit the job:
+```
+spark-submit --master yarn-client --class telemetry.DerivedStream target/scala-2.10/telemetry-parquet-converter.jar --from-date 20151028 --to-date 20151028 MyStream
 ```
