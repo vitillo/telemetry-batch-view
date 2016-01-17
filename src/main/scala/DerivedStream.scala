@@ -16,7 +16,7 @@ import org.json4s._
 import org.json4s.jackson.JsonMethods._
 import scala.collection.JavaConverters._
 import scala.io.Source
-import telemetry.streams.{E10sExperiment, ExecutiveStream, Churn}
+import telemetry.streams.{E10sExperiment, ExecutiveStream, Churn, Longitudinal}
 
 case class ObjectSummary(key: String, size: Long) // S3ObjectSummary can't be serialized
 
@@ -157,6 +157,10 @@ object DerivedStream {
       }
 
       (from, ds) <- stream match {
+        case "Longitudinal" =>
+          val longitudinal = Longitudinal("telemetry/4/main/Firefox")
+          Some(options.getOrElse('fromDate, to), longitudinal)
+
         case "ExecutiveStream" =>
           Some(options.getOrElse('fromDate, to), ExecutiveStream)
 
