@@ -103,6 +103,31 @@ object DerivedStream {
     prefix
   }
 
+  private def S3ls(bucket: Bucket, prefix: String, delimiter: String = "/"): Stream[String] = {
+    import com.amazonaws.services.s3.model.{ ListObjectsRequest, ObjectListing }
+
+    val request = new ListObjectsRequest().withBucketName(bucket.getName).withPrefix(prefix).withDelimiter(delimiter)
+    val firstListing = s3.listObjects(request)
+
+    def completeStream(listing: ObjectListing): Stream[String] = {
+      val prefixes = listing.getCommonPrefixes.asScala.toStream
+      prefixes #::: (if (listing.isTruncated) completeStream(s3.listNextBatchOfObjects(listing)) else Stream.empty)
+    }
+
+    completeStream(firstListing)
+  }
+
+  private def matchingPrefixes(bucket: Bucket, prefixes: Stream[String], pattern: List[String]): Stream[String] = {
+    if (pattern.isEmpty) {
+      prefixes
+    } else {
+      val matching = prefixes
+        .flatMap(prefix => S3ls(bucket, prefix))
+        .filter(prefix => (pattern.head == "*" || prefix.endsWith(pattern.head + "/")))
+      matchingPrefixes(bucket, matching, pattern.tail)
+    }
+  }
+
   private def convert(converter: DerivedStream, from: String, to: String) {
     val formatter = DateTimeFormat.forPattern("yyyyMMdd")
     val fromDate = formatter.parseDateTime(from)
@@ -121,7 +146,9 @@ object DerivedStream {
     val summaries = sc.parallelize(0 until daysCount + 1)
       .map(fromDate.plusDays(_).toString("yyyyMMdd"))
       .flatMap(date => {
-                 s3.objectSummaries(bucket, s"$prefix/$date/$filterPrefix")
+                 val bucket = Bucket("net-mozaws-prod-us-west-2-pipeline-data")
+                 matchingPrefixes(bucket, List("").toStream, s"$prefix/$date/$filterPrefix".split("/").toList)
+                   .flatMap(prefix => s3.objectSummaries(bucket, prefix))
                    .map(summary => ObjectSummary(summary.getKey(), summary.getSize()))})
 
     converter.transform(sc, bucket, summaries, from, to)
@@ -158,7 +185,7 @@ object DerivedStream {
 
       (from, ds) <- stream match {
         case "Longitudinal" =>
-          val longitudinal = Longitudinal("telemetry/4/main/Firefox")
+          val longitudinal = Longitudinal("telemetry/4/main/Firefox/release/*/*/*/42/")
           Some(options.getOrElse('fromDate, to), longitudinal)
 
         case "ExecutiveStream" =>
