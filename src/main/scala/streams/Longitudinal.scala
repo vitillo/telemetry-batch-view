@@ -26,16 +26,6 @@ case class Longitudinal(prefix: String) extends DerivedStream {
       return
     }
 
-    // Consider only 1% of clients
-    val sampled = summaries.
-      filter(summary => {
-               val dimensions = partitioning.dimensions.
-                 map(_.fieldName).
-                 zip(summary.key.split("/").drop(1)).
-                 toMap
-               dimensions("sampleId") == "15"
-             })
-
     val groups = DerivedStream.groupBySize(summaries.collect().toIterator)
     val clientMessages = sc.parallelize(groups, groups.size)
       .flatMap(x => x)
