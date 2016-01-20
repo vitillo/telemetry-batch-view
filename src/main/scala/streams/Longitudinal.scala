@@ -12,6 +12,8 @@ import telemetry.{DerivedStream, ObjectSummary}
 import telemetry.DerivedStream.s3
 import telemetry.heka.{HekaFrame, Message}
 import telemetry.parquet.ParquetFile
+import scala.util.Random
+import collection.JavaConversions._
 
 case class Longitudinal(prefix: String) extends DerivedStream {
   override def streamName: String = "telemetry-release"
@@ -61,6 +63,9 @@ case class Longitudinal(prefix: String) extends DerivedStream {
   }
 
   private def buildSchema: Schema = {
+    val histogramArray = SchemaBuilder.array().items().longType()
+    val histogramMap = SchemaBuilder.map().values().longType()
+
     SchemaBuilder
       .record("Submission")
       .fields
@@ -79,10 +84,13 @@ case class Longitudinal(prefix: String) extends DerivedStream {
       .name("build").`type`().array().items().stringType().noDefault()
       .name("partner").`type`().array().items().stringType().noDefault()
       .name("system").`type`().array().items().stringType().noDefault()
+      .name("histogramArray").`type`().optional().array().items(histogramArray)
+      .name("histogramMap").`type`().optional().array().items(histogramMap)
+      .name("histogram").`type`().optional().map().values().array().items().longType()
       .endRecord
   }
 
-  private def buildRecord(history: Iterable[Map[String, Any]], schema: Schema): Option[GenericRecord] ={
+  private def buildRecord(history: Iterable[Map[String, Any]], schema: Schema): Option[GenericRecord] = {
     // Sort records by timestamp
     val sorted = history
       .toList
@@ -94,6 +102,25 @@ case class Longitudinal(prefix: String) extends DerivedStream {
                      return None  // Ignore 'unsortable' client
                  }
                })
+
+    def generateRandomArrayHistogram(length: Int, max: Int): Array[Long] = {
+      for {
+        i <- 1L.to(length).toArray
+        r = Random.nextInt(max).toLong
+      } yield r
+    }
+
+    def generateRandomMapHistogram(length: Int, max: Int): java.util.Map[String, Long] = {
+      val histogram = generateRandomArrayHistogram(length, max)
+      1.to(length).map(_.toString).zip(histogram).toMap.asJava
+    }
+
+    def generateHistogram(length: Int, max: Int, num: Int): java.util.Map[String, Array[Long]] = {
+      val h = for {
+        index <- 1.to(length).map(_.toString)
+      } yield (index, generateRandomArrayHistogram(num, max))
+      h.toMap.asJava
+    }
 
     val root = new GenericRecordBuilder(schema)
       .set("clientId", sorted(0)("clientId").asInstanceOf[String])
@@ -111,6 +138,9 @@ case class Longitudinal(prefix: String) extends DerivedStream {
       .set("build", sorted.map(x => x.getOrElse("environment.build", "").asInstanceOf[String]).toArray)
       .set("partner", sorted.map(x => x.getOrElse("environment.partner", "").asInstanceOf[String]).toArray)
       .set("system", sorted.map(x => x.getOrElse("environment.system", "").asInstanceOf[String]).toArray)
+      .set("histogramArray", List.concat(sorted.map(x => generateRandomArrayHistogram(100, 10000))).toArray)
+      .set("histogramMap", List.concat(sorted.map(x => generateRandomMapHistogram(100, 10000))).toArray)
+      .set("histogram", generateHistogram(100, 10000, sorted.length))
       .build
 
     Some(root)
