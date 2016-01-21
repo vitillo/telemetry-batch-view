@@ -23,7 +23,7 @@ object Histograms {
                    "nightly" -> "https://hg.mozilla.org/mozilla-central/raw-file/tip/toolkit/components/telemetry/Histograms.json")
 
     val parsed = uris.map{ case (key, value) =>
-      (key, parse(Source.fromURL(value).mkString).extract[Map[String, HistogramDefinition]])
+      (key, parse(Source.fromURL(value, "UTF8").mkString).extract[Map[String, HistogramDefinition]])
     }
 
     // Histograms are considered to be immutable so it's OK to merge their definitions
