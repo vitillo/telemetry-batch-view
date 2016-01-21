@@ -185,7 +185,7 @@ object DerivedStream {
 
       (from, ds) <- stream match {
         case "Longitudinal" =>
-          val longitudinal = Longitudinal("telemetry/4/main/Firefox/release/*/*/*/42/")
+          val longitudinal = Longitudinal()
           Some(options.getOrElse('fromDate, to), longitudinal)
 
         case "ExecutiveStream" =>
