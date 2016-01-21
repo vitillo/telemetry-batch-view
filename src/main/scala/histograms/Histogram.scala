@@ -9,8 +9,7 @@ case class RawHistogram(var values: Map[String, Double], sum: Int)
 case class HistogramDefinition(alert_emails: List[String],
                      expires_in_version: String,
                      kind: String,
-                     keyed: Boolean = false,
-                     releaseChannelCollection: String = "opt-in",
+                     keyed: Option[Boolean],
                      description: String) {
 }
 

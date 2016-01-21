@@ -88,8 +88,9 @@ case class Longitudinal() extends DerivedStream {
       .name("sum").`type`().longType().noDefault()
       .endRecord()
 
+    // TODO: add description to histograms
     Histograms.definitions.foreach{ case (key, value) =>
-      (value.kind, value.keyed) match {
+      (value.kind, value.keyed.getOrElse(false)) match {
         case ("flag", false) =>
           builder.name(key).`type`().optional().array().items().booleanType()
         case ("flag", true) =>
@@ -141,14 +142,8 @@ case class Longitudinal() extends DerivedStream {
         r = Random.nextInt(max).toLong
       } yield r
 
-      val histogramType = SchemaBuilder
-        .record("Histogram")
-        .fields()
-        .name("values").`type`().array().items().longType().noDefault()
-        .name("sum").`type`().longType().noDefault()
-        .endRecord()
-
-      val record = new GenericData.Record(histogramType)
+      val histogramSchema = schema.getField("GC_MS").schema().getTypes()(1).getElementType()
+      val record = new GenericData.Record(histogramSchema)
       record.put("sum", Random.nextInt(max).toLong)
       record.put("values", values)
       record
