@@ -3,22 +3,23 @@ package telemetry.streams
 import awscala._
 import awscala.s3._
 import org.apache.avro.{Schema, SchemaBuilder}
-import org.apache.avro.generic.{GenericRecord, GenericRecordBuilder}
+import org.apache.avro.generic.{GenericRecord, GenericData, GenericRecordBuilder}
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
+import org.json4s._
 import org.json4s.jackson.JsonMethods._
 import scala.collection.JavaConverters._
 import telemetry.{DerivedStream, ObjectSummary}
 import telemetry.DerivedStream.s3
 import telemetry.heka.{HekaFrame, Message}
 import telemetry.parquet.ParquetFile
+import telemetry.histograms.{Histograms, RawHistogram}
 import scala.util.Random
 import collection.JavaConversions._
 
-case class Longitudinal(prefix: String) extends DerivedStream {
+case class Longitudinal() extends DerivedStream {
   override def streamName: String = "telemetry-release"
-
-  override def filterPrefix: String = prefix
+  override def filterPrefix: String = "telemetry/4/main/Firefox/release/*/*/*/42/"
 
   override def transform(sc: SparkContext, bucket: Bucket, summaries: RDD[ObjectSummary], from: String, to: String) {
     val prefix = s"generationDate=$to"
@@ -58,15 +59,10 @@ case class Longitudinal(prefix: String) extends DerivedStream {
           uploadLocalFileToS3(localFile, prefix)
         }
     }
-
-    println("Number of clients", clientMessages.count())
   }
 
   private def buildSchema: Schema = {
-    val histogramArray = SchemaBuilder.array().items().longType()
-    val histogramMap = SchemaBuilder.map().values().longType()
-
-    SchemaBuilder
+    val builder = SchemaBuilder
       .record("Submission")
       .fields
       .name("clientId").`type`().stringType().noDefault()
@@ -84,10 +80,46 @@ case class Longitudinal(prefix: String) extends DerivedStream {
       .name("build").`type`().array().items().stringType().noDefault()
       .name("partner").`type`().array().items().stringType().noDefault()
       .name("system").`type`().array().items().stringType().noDefault()
-      .name("histogramArray").`type`().optional().array().items(histogramArray)
-      .name("histogramMap").`type`().optional().array().items(histogramMap)
-      .name("histogram").`type`().optional().map().values().array().items().longType()
-      .endRecord
+
+    val histogramType = SchemaBuilder
+      .record("Histogram")
+      .fields()
+      .name("values").`type`().array().items().longType().noDefault()
+      .name("sum").`type`().longType().noDefault()
+      .endRecord()
+
+    Histograms.definitions.foreach{ case (key, value) =>
+      (value.kind, value.keyed) match {
+        case ("flag", false) =>
+          builder.name(key).`type`().optional().array().items().booleanType()
+        case ("flag", true) =>
+          builder.name(key).`type`().optional().array().items().map().values().booleanType()
+        case ("count", false) =>
+          builder.name(key).`type`().optional().array().items().longType()
+        case ("count", true) =>
+          builder.name(key).`type`().optional().array().items().map().values().longType()
+        case ("boolean", false) =>
+          builder.name(key).`type`().optional().array().items(histogramType)
+        case ("boolean", true) =>
+          builder.name(key).`type`().optional().array().items().map().values(histogramType)
+        case ("enumerated", false) =>
+          builder.name(key).`type`().optional().array().items(histogramType)
+        case ("enumerated", true) =>
+          builder.name(key).`type`().optional().array().items().map().values(histogramType)
+        case ("linear", false) =>
+          builder.name(key).`type`().optional().array().items(histogramType)
+        case ("linear", true) =>
+          builder.name(key).`type`().optional().array().items().map().values(histogramType)
+        case ("exponential", false) =>
+          builder.name(key).`type`().optional().array().items(histogramType)
+        case ("exponential", true) =>
+          builder.name(key).`type`().optional().array().items().map().values(histogramType)
+        case _ =>
+          throw new Exception("Unrecognized histogram type")
+      }
+    }
+
+    builder.endRecord()
   }
 
   private def buildRecord(history: Iterable[Map[String, Any]], schema: Schema): Option[GenericRecord] = {
@@ -103,23 +135,23 @@ case class Longitudinal(prefix: String) extends DerivedStream {
                  }
                })
 
-    def generateRandomArrayHistogram(length: Int, max: Int): Array[Long] = {
-      for {
+    def generateRandomHistogram(length: Int, max: Int): GenericData.Record = {
+      val values = for {
         i <- 1L.to(length).toArray
         r = Random.nextInt(max).toLong
       } yield r
-    }
 
-    def generateRandomMapHistogram(length: Int, max: Int): java.util.Map[String, Long] = {
-      val histogram = generateRandomArrayHistogram(length, max)
-      1.to(length).map(_.toString).zip(histogram).toMap.asJava
-    }
+      val histogramType = SchemaBuilder
+        .record("Histogram")
+        .fields()
+        .name("values").`type`().array().items().longType().noDefault()
+        .name("sum").`type`().longType().noDefault()
+        .endRecord()
 
-    def generateHistogram(length: Int, max: Int, num: Int): java.util.Map[String, Array[Long]] = {
-      val h = for {
-        index <- 1.to(length).map(_.toString)
-      } yield (index, generateRandomArrayHistogram(num, max))
-      h.toMap.asJava
+      val record = new GenericData.Record(histogramType)
+      record.put("sum", Random.nextInt(max).toLong)
+      record.put("values", values)
+      record
     }
 
     val root = new GenericRecordBuilder(schema)
@@ -138,9 +170,7 @@ case class Longitudinal(prefix: String) extends DerivedStream {
       .set("build", sorted.map(x => x.getOrElse("environment.build", "").asInstanceOf[String]).toArray)
       .set("partner", sorted.map(x => x.getOrElse("environment.partner", "").asInstanceOf[String]).toArray)
       .set("system", sorted.map(x => x.getOrElse("environment.system", "").asInstanceOf[String]).toArray)
-      .set("histogramArray", List.concat(sorted.map(x => generateRandomArrayHistogram(100, 10000))).toArray)
-      .set("histogramMap", List.concat(sorted.map(x => generateRandomMapHistogram(100, 10000))).toArray)
-      .set("histogram", generateHistogram(100, 10000, sorted.length))
+      .set("GC_MS", List.concat(sorted.map(x => generateRandomHistogram(100, 10000))).toArray)
       .build
 
     Some(root)
