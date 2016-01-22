@@ -4,7 +4,7 @@ import org.json4s._
 import org.json4s.jackson.JsonMethods._
 import scala.io.Source
 
-case class RawHistogram(var values: Map[String, Double], sum: Int)
+case class RawHistogram(values: Map[String, Long], sum: Long)
 
 case class HistogramDefinition(alert_emails: List[String],
                      expires_in_version: String,

@@ -16,6 +16,8 @@ import telemetry.parquet.ParquetFile
 import telemetry.histograms.{Histograms, RawHistogram}
 import scala.util.Random
 import collection.JavaConversions._
+import scala.math.max
+import scala.collection.mutable.ListBuffer
 
 case class Longitudinal() extends DerivedStream {
   override def streamName: String = "telemetry-release"
@@ -44,6 +46,7 @@ case class Longitudinal() extends DerivedStream {
           case _ => Nil
         }}
       .groupByKey()
+      .coalesce(max((0.5*sc.defaultParallelism).toInt, 1), true)  // see https://issues.apache.org/jira/browse/PARQUET-222
 
     clientMessages
       .values
@@ -66,15 +69,12 @@ case class Longitudinal() extends DerivedStream {
       .record("Submission")
       .fields
       .name("clientId").`type`().stringType().noDefault()
-      .name("os").`type`().stringType().noDefault()
       .name("creationTimestamp").`type`().array().items().doubleType().noDefault()
+      .name("os").`type`().stringType().noDefault()
       .name("simpleMeasurements").`type`().array().items().stringType().noDefault()
       .name("log").`type`().array().items().stringType().noDefault()
       .name("info").`type`().array().items().stringType().noDefault()
       .name("addonDetails").`type`().array().items().stringType().noDefault()
-      .name("addonHistograms").`type`().array().items().stringType().noDefault()
-      .name("histograms").`type`().array().items().stringType().noDefault()
-      .name("keyedHistograms").`type`().array().items().stringType().noDefault()
       .name("settings").`type`().array().items().stringType().noDefault()
       .name("profile").`type`().array().items().stringType().noDefault()
       .name("build").`type`().array().items().stringType().noDefault()
@@ -157,17 +157,45 @@ case class Longitudinal() extends DerivedStream {
       .set("log", sorted.map(x => x.getOrElse("payload.log", "").asInstanceOf[String]).toArray)
       .set("info", sorted.map(x => x.getOrElse("payload.info", "").asInstanceOf[String]).toArray)
       .set("addonDetails", sorted.map(x => x.getOrElse("payload.addonDetails", "").asInstanceOf[String]).toArray)
-      .set("addonHistograms", sorted.map(x => x.getOrElse("payload.addonHistograms", "").asInstanceOf[String]).toArray)
-      .set("histograms", sorted.map(x => x.getOrElse("payload.histograms", "").asInstanceOf[String]).toArray)
-      .set("keyedHistograms", sorted.map(x => x.getOrElse("payload.keyedHistograms", "").asInstanceOf[String]).toArray)
       .set("settings", sorted.map(x => x.getOrElse("environment.settings", "").asInstanceOf[String]).toArray)
       .set("profile", sorted.map(x => x.getOrElse("environment.profile", "").asInstanceOf[String]).toArray)
       .set("build", sorted.map(x => x.getOrElse("environment.build", "").asInstanceOf[String]).toArray)
       .set("partner", sorted.map(x => x.getOrElse("environment.partner", "").asInstanceOf[String]).toArray)
       .set("system", sorted.map(x => x.getOrElse("environment.system", "").asInstanceOf[String]).toArray)
       .set("GC_MS", List.concat(sorted.map(x => generateRandomHistogram(100, 10000))).toArray)
-      .build
 
-    Some(root)
+    implicit val formats = DefaultFormats
+
+    val histogramsList = sorted.map{ case (x) =>
+      val json = x("payload.histograms").asInstanceOf[String]
+      parse(json).extract[Map[String, RawHistogram]]
+    }
+    val uniqueKeys = histogramsList.flatMap(x => x.keys).distinct.toSet
+    val validKeys = for {
+      key <- uniqueKeys
+      definition <- Histograms.definitions.get(key)
+    } yield (key, definition)
+
+    for ((key, definition) <- validKeys) {
+      (definition.kind, definition.keyed.getOrElse(false)) match {
+        case ("flag", false) =>
+          val buffer = ListBuffer[Boolean]()
+
+          for (histograms <- histogramsList) {
+            histograms.get(key) match {
+              case Some(histogram) =>
+                buffer += histogram.values("0") > 0
+              case None =>
+                buffer += false  // Assume false for missing flag histograms
+            }
+          }
+
+          root.set(key, buffer.toArray)
+
+        case _ =>
+      }
+    }
+
+    Some(root.build)
   }
 }
