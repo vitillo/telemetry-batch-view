@@ -18,6 +18,7 @@ import scala.util.Random
 import collection.JavaConversions._
 import scala.math.max
 import scala.collection.mutable.ListBuffer
+import scala.reflect.ClassTag
 
 case class Longitudinal() extends DerivedStream {
   override def streamName: String = "telemetry-release"
@@ -123,6 +124,54 @@ case class Longitudinal() extends DerivedStream {
     builder.endRecord()
   }
 
+  private def vectorizeHistograms[T:ClassTag](payloads: List[Map[String, RawHistogram]],
+                                              name: String,
+                                              builder: RawHistogram => T,
+                                              default: T): Array[T] = {
+    val buffer = ListBuffer[T]()
+    for (histograms <- payloads) {
+      histograms.get(name) match {
+        case Some(histogram) =>
+          buffer += builder(histogram)
+        case None =>
+          buffer += default
+      }
+    }
+    buffer.toArray
+  }
+
+  private def buildHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder) {
+    implicit val formats = DefaultFormats
+
+    val histogramsList = payloads.map{ case (x) =>
+      val json = x("payload.histograms").asInstanceOf[String]
+      parse(json).extract[Map[String, RawHistogram]]
+    }
+    val uniqueKeys = histogramsList.flatMap(x => x.keys).distinct.toSet
+    val validKeys = for {
+      key <- uniqueKeys
+      definition <- Histograms.definitions.get(key)
+    } yield (key, definition)
+
+    for ((key, definition) <- validKeys) {
+      definition.kind match {
+        case "flag" =>
+          root.set(key, vectorizeHistograms(histogramsList, key, h => h.values("0") > 0, false))
+
+        case "boolean" =>
+          def build(h: RawHistogram): Array[Long] =
+            Array(h.values.getOrElse("0", 0L).asInstanceOf[Long], h.values.getOrElse("1", 0L).asInstanceOf[Long])
+
+          root.set(key, vectorizeHistograms(histogramsList, key, build, Array[Long]()))
+
+        case "count" =>
+          root.set(key, vectorizeHistograms(histogramsList, key, h => h.values.getOrElse("0", 0L), 0L))
+
+        case _ =>
+      }
+    }
+  }
+
   private def buildRecord(history: Iterable[Map[String, Any]], schema: Schema): Option[GenericRecord] = {
     // Sort records by timestamp
     val sorted = history
@@ -164,38 +213,7 @@ case class Longitudinal() extends DerivedStream {
       .set("system", sorted.map(x => x.getOrElse("environment.system", "").asInstanceOf[String]).toArray)
       .set("GC_MS", List.concat(sorted.map(x => generateRandomHistogram(100, 10000))).toArray)
 
-    implicit val formats = DefaultFormats
-
-    val histogramsList = sorted.map{ case (x) =>
-      val json = x("payload.histograms").asInstanceOf[String]
-      parse(json).extract[Map[String, RawHistogram]]
-    }
-    val uniqueKeys = histogramsList.flatMap(x => x.keys).distinct.toSet
-    val validKeys = for {
-      key <- uniqueKeys
-      definition <- Histograms.definitions.get(key)
-    } yield (key, definition)
-
-    for ((key, definition) <- validKeys) {
-      (definition.kind, definition.keyed.getOrElse(false)) match {
-        case ("flag", false) =>
-          val buffer = ListBuffer[Boolean]()
-
-          for (histograms <- histogramsList) {
-            histograms.get(key) match {
-              case Some(histogram) =>
-                buffer += histogram.values("0") > 0
-              case None =>
-                buffer += false  // Assume false for missing flag histograms
-            }
-          }
-
-          root.set(key, buffer.toArray)
-
-        case _ =>
-      }
-    }
-
+    buildHistograms(sorted, root)
     Some(root.build)
   }
 }
