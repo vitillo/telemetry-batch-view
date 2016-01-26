@@ -91,7 +91,7 @@ case class Longitudinal() extends DerivedStream {
 
     // TODO: add description to histograms
     Histograms.definitions.foreach{ case (key, value) =>
-      (value.kind, value.keyed.getOrElse(false)) match {
+      (value.kind, value.keyed) match {
         case ("flag", false) =>
           builder.name(key).`type`().optional().array().items().booleanType()
         case ("flag", true) =>
@@ -186,22 +186,23 @@ case class Longitudinal() extends DerivedStream {
           root.set(key, vectorizeHistograms(histogramsList, key, h => h.values.getOrElse("0", 0L), 0L))
 
         case "enumerated" =>
-          definition.n_values match {
-            case Some(nBins) =>
-
+          definition.nValues match {
+            case Some(numValues: Int) =>
               def build(h: RawHistogram): Array[Long] = {
-                val values = Array.fill(nBins + 1){0L}
+                val values = Array.fill(numValues + 1){0L}
                 h.values.foreach{case (key, value) =>
                   values(key.toInt) = value
                 }
                 values
               }
 
-              root.set(key, vectorizeHistograms(histogramsList, key, build, Array.fill(nBins + 1){0L}))
+              root.set(key, vectorizeHistograms(histogramsList, key, build, Array.fill(numValues + 1){0L}))
 
             case _ =>
-              // Ignore invalid histogram definition
+              // Ignore histogram with computed values
           }
+
+        case "linear" =>
 
         case _ =>
       }

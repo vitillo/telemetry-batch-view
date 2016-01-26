@@ -23,6 +23,9 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
            ("sum" -> 42)) ~
         ("PLACES_BACKUPS_DAYSFROMLAST" ->
            ("values" -> ("1" -> 42)) ~
+           ("sum" -> 42)) ~
+        ("GC_BUDGET_MS" ->
+           ("values" -> ("1" -> 42)) ~
            ("sum" -> 42))
 
       Map("clientId" -> "26c9d181-b95b-4af5-bb35-84ebf0da795d",
