@@ -140,18 +140,22 @@ case class Longitudinal() extends DerivedStream {
     buffer.toArray
   }
 
-  private def buildHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder) {
+  private def buildHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
     implicit val formats = DefaultFormats
 
     val histogramsList = payloads.map{ case (x) =>
       val json = x("payload.histograms").asInstanceOf[String]
       parse(json).extract[Map[String, RawHistogram]]
     }
+
     val uniqueKeys = histogramsList.flatMap(x => x.keys).distinct.toSet
+
     val validKeys = for {
       key <- uniqueKeys
       definition <- Histograms.definitions.get(key)
     } yield (key, definition)
+
+    val histogramSchema = schema.getField("GC_MS").schema().getTypes()(1).getElementType()
 
     for ((key, definition) <- validKeys) {
       definition.kind match {
@@ -159,10 +163,24 @@ case class Longitudinal() extends DerivedStream {
           root.set(key, vectorizeHistograms(histogramsList, key, h => h.values("0") > 0, false))
 
         case "boolean" =>
-          def build(h: RawHistogram): Array[Long] =
-            Array(h.values.getOrElse("0", 0L).asInstanceOf[Long], h.values.getOrElse("1", 0L).asInstanceOf[Long])
+          def build(h: RawHistogram): GenericData.Record = {
+            val record = new GenericData.Record(histogramSchema)
+            val values = Array(h.values.getOrElse("0", 0L), h.values.getOrElse("1", 0L))
+            val sum = h.sum
 
-          root.set(key, vectorizeHistograms(histogramsList, key, build, Array[Long]()))
+            record.put("values", values)
+            record.put("sum", sum)
+            record
+          }
+
+          val empty = {
+            val record = new GenericData.Record(histogramSchema)
+            record.put("values", Array[Long](0L, 0L))
+            record.put("sum", 0)
+            record
+          }
+
+          root.set(key, vectorizeHistograms(histogramsList, key, build, empty))
 
         case "count" =>
           root.set(key, vectorizeHistograms(histogramsList, key, h => h.values.getOrElse("0", 0L), 0L))
@@ -185,19 +203,6 @@ case class Longitudinal() extends DerivedStream {
                  }
                })
 
-    def generateRandomHistogram(length: Int, max: Int): GenericData.Record = {
-      val values = for {
-        i <- 1L.to(length).toArray
-        r = Random.nextInt(max).toLong
-      } yield r
-
-      val histogramSchema = schema.getField("GC_MS").schema().getTypes()(1).getElementType()
-      val record = new GenericData.Record(histogramSchema)
-      record.put("sum", Random.nextInt(max).toLong)
-      record.put("values", values)
-      record
-    }
-
     val root = new GenericRecordBuilder(schema)
       .set("clientId", sorted(0)("clientId").asInstanceOf[String])
       .set("os", sorted(0)("os").asInstanceOf[String])
@@ -211,9 +216,8 @@ case class Longitudinal() extends DerivedStream {
       .set("build", sorted.map(x => x.getOrElse("environment.build", "").asInstanceOf[String]).toArray)
       .set("partner", sorted.map(x => x.getOrElse("environment.partner", "").asInstanceOf[String]).toArray)
       .set("system", sorted.map(x => x.getOrElse("environment.system", "").asInstanceOf[String]).toArray)
-      .set("GC_MS", List.concat(sorted.map(x => generateRandomHistogram(100, 10000))).toArray)
 
-    buildHistograms(sorted, root)
+    buildHistograms(sorted, root, schema)
     Some(root.build)
   }
 }

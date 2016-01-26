@@ -59,9 +59,12 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
   }
 
   "Boolean histograms" must "be stored correctly" in {
-    val histograms = fixture.record.get("DEVTOOLS_TOOLBOX_OPENED_BOOLEAN").asInstanceOf[Array[Array[Long]]].toList
-    assert(histograms.length == fixture.payloads.length)
-    histograms.zip(Stream.continually(Array(42L, 0L))).foreach{case (x, y) => assert(x.toList == y.toList)}
+    val records = fixture.record.get("DEVTOOLS_TOOLBOX_OPENED_BOOLEAN").asInstanceOf[Array[Record]].toList
+    assert(records.length == fixture.payloads.length)
+    records.foreach{ x =>
+      assert(x.get("sum") == 0L)
+      assert(x.get("values").asInstanceOf[Array[Long]].toList == Array(42L, 0L).toList)
+    }
   }
 
   "Count histograms" must "be stored correctly" in {
