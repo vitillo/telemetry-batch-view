@@ -20,8 +20,10 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
            ("sum" -> 0)) ~
         ("UPDATE_CHECK_NO_UPDATE_EXTERNAL" ->
            ("values" -> ("0" -> 42)) ~
+           ("sum" -> 42)) ~
+        ("PLACES_BACKUPS_DAYSFROMLAST" ->
+           ("values" -> ("1" -> 42)) ~
            ("sum" -> 42))
-
 
       Map("clientId" -> "26c9d181-b95b-4af5-bb35-84ebf0da795d",
           "creationTimestamp" -> creationTimestamp,
@@ -59,6 +61,7 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
   }
 
   "Boolean histograms" must "be stored correctly" in {
+    // TODO: Use Array[Array[Long]] instead as sum is useless
     val records = fixture.record.get("DEVTOOLS_TOOLBOX_OPENED_BOOLEAN").asInstanceOf[Array[Record]].toList
     assert(records.length == fixture.payloads.length)
     records.foreach{ x =>
@@ -71,5 +74,19 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     val histograms = fixture.record.get("UPDATE_CHECK_NO_UPDATE_EXTERNAL").asInstanceOf[Array[Long]].toList
     assert(histograms.length == fixture.payloads.length)
     histograms.zip(Stream.continually(42)).foreach{case (x, y) => assert(x== y)}
+  }
+
+  "Enumerated histograms" must "be stored correctly" in {
+    val histograms = fixture.record.get("PLACES_BACKUPS_DAYSFROMLAST").asInstanceOf[Array[Array[Long]]]
+    assert(histograms.length == fixture.payloads.length)
+    for(histogram <- histograms) {
+      assert(histogram.length == 16)
+      for((value, key) <- histogram.zipWithIndex) {
+        if (key == 1)
+          assert(value == 42)
+        else
+          assert(value == 0)
+      }
+    }
   }
 }

@@ -9,6 +9,7 @@ case class RawHistogram(values: Map[String, Long], sum: Long)
 case class HistogramDefinition(alert_emails: List[String],
                      expires_in_version: String,
                      kind: String,
+                     n_values: Option[Int],
                      keyed: Option[Boolean],
                      description: String) {
 }
