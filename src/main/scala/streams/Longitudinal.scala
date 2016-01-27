@@ -141,15 +141,6 @@ case class Longitudinal() extends DerivedStream {
     buffer.toArray
   }
 
-  private def linearBuckets(min: Float, max: Float, nBuckets: Int): Array[Int] = {
-    var values = Array.fill(nBuckets){0}
-    for(i <- 1 until nBuckets) {
-      val linearRange = (min * (nBuckets - 1 - i) + max * (i - 1)) / (nBuckets - 2)
-      values(i) = (linearRange + 0.5).toInt
-    }
-    values
-  }
-
   private def buildHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
     implicit val formats = DefaultFormats
 
@@ -207,7 +198,31 @@ case class Longitudinal() extends DerivedStream {
           root.set(key, vectorizeHistograms(histogramsList, key, build, Array.fill(definition.nValues + 1){0L}))
 
         case definition: LinearHistogram =>
-          val buckets = linearBuckets(definition.low, definition.high, definition.nBuckets)
+          val buckets = Histograms.linearBuckets(definition.low, definition.high, definition.nBuckets)
+          def build(h: RawHistogram): GenericData.Record = {
+            val values = Array.fill(buckets.length){0L}
+            h.values.foreach{ case (key, value) =>
+              val index = buckets.indexOf(key.toInt)
+              values(index) = value
+            }
+
+            val record = new GenericData.Record(histogramSchema)
+            record.put("values", values)
+            record.put("sum", h.sum)
+            record
+          }
+
+          val empty = {
+            val record = new GenericData.Record(histogramSchema)
+            record.put("values", Array.fill(buckets.length){0L})
+            record.put("sum", 0)
+            record
+          }
+
+          root.set(key, vectorizeHistograms(histogramsList, key, build, empty))
+
+        case definition: ExponentialHistogram =>
+          val buckets = Histograms.exponentialBuckets(definition.low, definition.high, definition.nBuckets)
           def build(h: RawHistogram): GenericData.Record = {
             val values = Array.fill(buckets.length){0L}
             h.values.foreach{ case (key, value) =>

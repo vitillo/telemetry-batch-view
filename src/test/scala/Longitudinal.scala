@@ -26,6 +26,9 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
            ("sum" -> 42)) ~
         ("GC_BUDGET_MS" ->
            ("values" -> ("1" -> 42)) ~
+           ("sum" -> 42)) ~
+        ("GC_MS" ->
+           ("values" -> ("1" -> 42)) ~
            ("sum" -> 42))
 
       Map("clientId" -> "26c9d181-b95b-4af5-bb35-84ebf0da795d",
@@ -98,6 +101,19 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     assert(records.length == fixture.payloads.length)
 
     val reference = Array(0L, 42L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L)
+    records.foreach{ x =>
+      assert(x.get("sum") == 42L)
+      assert(x.get("values").asInstanceOf[Array[Long]].toList == reference.toList)
+    }
+  }
+
+  "Exponential histograms" must "be stored correctly" in {
+    val records = fixture.record.get("GC_MS").asInstanceOf[Array[Record]].toList
+    assert(records.length == fixture.payloads.length)
+
+    val reference = Array.fill(50){0}
+    reference(1) = 42
+
     records.foreach{ x =>
       assert(x.get("sum") == 42L)
       assert(x.get("values").asInstanceOf[Array[Long]].toList == reference.toList)

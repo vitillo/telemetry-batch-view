@@ -96,4 +96,49 @@ object Histograms {
     // Histograms are considered to be immutable so it's OK to merge their definitions
     parsed.flatMap(_._2).toMap
   }
+
+  def linearBuckets(min: Float, max: Float, nBuckets: Int): Array[Int] = {
+    lazy val buckets = {
+      var values = Array.fill(nBuckets){0}
+
+      for(i <- 1 until nBuckets) {
+        val linearRange = (min * (nBuckets - 1 - i) + max * (i - 1)) / (nBuckets - 2)
+        values(i) = (linearRange + 0.5).toInt
+      }
+
+      values
+    }
+
+    memoLinearBuckets.getOrElseUpdate((min, max, nBuckets), buckets)
+  }
+
+  def exponentialBuckets(min: Float, max: Float, nBuckets: Int): Array[Int] = {
+    lazy val buckets = {
+      val logMax = math.log(max)
+      val bucketIndex = 2
+      val retArray = Array.fill(nBuckets){0}
+      var current = min.toInt
+
+      retArray(1) = current.toInt
+      for (bucketIndex <- 2 until nBuckets) {
+        val logCurrent = math.log(current)
+        val logRatio = (logMax - logCurrent) / (nBuckets - bucketIndex)
+        val logNext = logCurrent + logRatio
+        val nextValue = math.floor(math.exp(logNext) + 0.5).toInt
+
+        if (nextValue > current)
+          current = nextValue
+        else
+          current = current + 1
+        retArray(bucketIndex) = current
+      }
+
+      retArray
+    }
+
+    memoExponentialBuckets.getOrElseUpdate((min, max, nBuckets), buckets)
+  }
+
+  private val memoLinearBuckets = MMap[Tuple3[Float, Float, Int], Array[Int]]()
+  private val memoExponentialBuckets = MMap[Tuple3[Float, Float, Int], Array[Int]]()
 }
