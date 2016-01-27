@@ -193,12 +193,7 @@ case class Longitudinal() extends DerivedStream {
           def build(h: RawHistogram): Array[Long] = {
             val values = Array.fill(definition.nValues + 1){0L}
             h.values.foreach{case (key, value) =>
-              try {
-                values(key.toInt) = value
-              } catch {
-                case _ =>
-                  // Ignore parsing errors
-              }
+              values(key.toInt) = value
             }
             values
           }
@@ -210,13 +205,8 @@ case class Longitudinal() extends DerivedStream {
           def build(h: RawHistogram): GenericData.Record = {
             val values = Array.fill(buckets.length){0L}
             h.values.foreach{ case (key, value) =>
-              try {
-                val index = buckets.indexOf(key.toInt)
-                values(index) = value
-              } catch {
-                case _ =>
-                  // Ignore parsing errors
-              }
+              val index = buckets.indexOf(key.toInt)
+              values(index) = value
             }
 
             val record = new GenericData.Record(histogramSchema)
@@ -239,13 +229,8 @@ case class Longitudinal() extends DerivedStream {
           def build(h: RawHistogram): GenericData.Record = {
             val values = Array.fill(buckets.length){0L}
             h.values.foreach{ case (key, value) =>
-              try {
-                val index = buckets.indexOf(key.toInt)
-                values(index) = value
-              }catch {
-                case _ =>
-                  // Ignore parsing errors
-              }
+              val index = buckets.indexOf(key.toInt)
+              values(index) = value
             }
 
             val record = new GenericData.Record(histogramSchema)
@@ -295,7 +280,15 @@ case class Longitudinal() extends DerivedStream {
       .set("partner", sorted.map(x => x.getOrElse("environment.partner", "").asInstanceOf[String]).toArray)
       .set("system", sorted.map(x => x.getOrElse("environment.system", "").asInstanceOf[String]).toArray)
 
-    buildHistograms(sorted, root, schema)
+    try {
+      //buildKeyedHistograms(sorted, root, schema)
+      buildHistograms(sorted, root, schema)
+    } catch {
+      case _=>
+        // Ignore buggy clients
+        return None
+    }
+
     Some(root.build)
   }
 }
