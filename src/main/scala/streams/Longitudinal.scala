@@ -13,7 +13,7 @@ import telemetry.{DerivedStream, ObjectSummary}
 import telemetry.DerivedStream.s3
 import telemetry.heka.{HekaFrame, Message}
 import telemetry.parquet.ParquetFile
-import telemetry.histograms.{Histograms, RawHistogram}
+import telemetry.histograms._
 import scala.util.Random
 import collection.JavaConversions._
 import scala.math.max
@@ -91,30 +91,30 @@ case class Longitudinal() extends DerivedStream {
 
     // TODO: add description to histograms
     Histograms.definitions.foreach{ case (key, value) =>
-      (value.kind, value.keyed) match {
-        case ("flag", false) =>
+      value match {
+        case h: FlagHistogram if h.keyed == false =>
           builder.name(key).`type`().optional().array().items().booleanType()
-        case ("flag", true) =>
+        case h: FlagHistogram =>
           builder.name(key).`type`().optional().array().items().map().values().booleanType()
-        case ("count", false) =>
+        case h: CountHistogram if h.keyed == false =>
           builder.name(key).`type`().optional().array().items().longType()
-        case ("count", true) =>
+        case h: CountHistogram =>
           builder.name(key).`type`().optional().array().items().map().values().longType()
-        case ("boolean", false) =>
-          builder.name(key).`type`().optional().array().items(histogramType)
-        case ("boolean", true) =>
-          builder.name(key).`type`().optional().array().items().map().values(histogramType)
-        case ("enumerated", false) =>
+        case h: EnumeratedHistogram if h.keyed == false =>
           builder.name(key).`type`().optional().array().items().array().items().longType()
-        case ("enumerated", true) =>
+        case h: EnumeratedHistogram =>
           builder.name(key).`type`().optional().array().items().map().values().array().items().longType()
-        case ("linear", false) =>
+        case h: BooleanHistogram if h.keyed == false =>
           builder.name(key).`type`().optional().array().items(histogramType)
-        case ("linear", true) =>
+        case h: BooleanHistogram =>
           builder.name(key).`type`().optional().array().items().map().values(histogramType)
-        case ("exponential", false) =>
+        case h: LinearHistogram if h.keyed == false =>
           builder.name(key).`type`().optional().array().items(histogramType)
-        case ("exponential", true) =>
+        case h: LinearHistogram =>
+          builder.name(key).`type`().optional().array().items().map().values(histogramType)
+        case h: ExponentialHistogram if h.keyed == false =>
+          builder.name(key).`type`().optional().array().items(histogramType)
+        case h: ExponentialHistogram =>
           builder.name(key).`type`().optional().array().items().map().values(histogramType)
         case _ =>
           throw new Exception("Unrecognized histogram type")
@@ -123,6 +123,7 @@ case class Longitudinal() extends DerivedStream {
 
     builder.endRecord()
   }
+
 
   private def vectorizeHistograms[T:ClassTag](payloads: List[Map[String, RawHistogram]],
                                               name: String,
@@ -157,12 +158,12 @@ case class Longitudinal() extends DerivedStream {
 
     val histogramSchema = schema.getField("GC_MS").schema().getTypes()(1).getElementType()
 
-    for ((key, definition) <- validKeys) {
-      definition.kind match {
-        case "flag" =>
+    for ((key, value) <- validKeys) {
+      value match {
+        case _: FlagHistogram =>
           root.set(key, vectorizeHistograms(histogramsList, key, h => h.values("0") > 0, false))
 
-        case "boolean" =>
+        case _: BooleanHistogram =>
           def build(h: RawHistogram): GenericData.Record = {
             val record = new GenericData.Record(histogramSchema)
             val values = Array(h.values.getOrElse("0", 0L), h.values.getOrElse("1", 0L))
@@ -182,27 +183,23 @@ case class Longitudinal() extends DerivedStream {
 
           root.set(key, vectorizeHistograms(histogramsList, key, build, empty))
 
-        case "count" =>
+        case _: CountHistogram =>
           root.set(key, vectorizeHistograms(histogramsList, key, h => h.values.getOrElse("0", 0L), 0L))
 
-        case "enumerated" =>
-          definition.nValues match {
-            case Some(numValues: Int) =>
-              def build(h: RawHistogram): Array[Long] = {
-                val values = Array.fill(numValues + 1){0L}
-                h.values.foreach{case (key, value) =>
-                  values(key.toInt) = value
-                }
-                values
-              }
-
-              root.set(key, vectorizeHistograms(histogramsList, key, build, Array.fill(numValues + 1){0L}))
-
-            case _ =>
-              // Ignore histogram with computed values
+        case definition: EnumeratedHistogram =>
+          def build(h: RawHistogram): Array[Long] = {
+            val values = Array.fill(definition.nValues + 1){0L}
+            h.values.foreach{case (key, value) =>
+              values(key.toInt) = value
+            }
+            values
           }
 
-        case "linear" =>
+          root.set(key, vectorizeHistograms(histogramsList, key, build, Array.fill(definition.nValues + 1){0L}))
+
+        case d: LinearHistogram =>
+          // val low = definition.low.getOrElse(0)
+          // val high = definition.high.get
 
         case _ =>
       }

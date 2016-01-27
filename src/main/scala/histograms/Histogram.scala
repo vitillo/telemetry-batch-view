@@ -7,12 +7,13 @@ import scala.io.Source
 
 case class RawHistogram(values: Map[String, Long], sum: Long)
 
-case class HistogramDefinition(kind: String,
-                               keyed: Boolean,
-                               nValues: Option[Int],
-                               low: Option[Int],
-                               high: Option[Int],
-                               nBuckets: Option[Int])
+sealed abstract class HistogramDefinition
+case class FlagHistogram(keyed: Boolean) extends HistogramDefinition
+case class BooleanHistogram(keyed: Boolean) extends HistogramDefinition
+case class CountHistogram(keyed: Boolean) extends HistogramDefinition
+case class EnumeratedHistogram(keyed: Boolean, nValues: Int) extends HistogramDefinition
+case class LinearHistogram(keyed: Boolean, low: Int, high: Int, nBuckets: Int) extends HistogramDefinition
+case class ExponentialHistogram(keyed: Boolean, low: Int, high: Int, nBuckets: Int) extends HistogramDefinition
 
 object Histograms {
   val definitions = {
@@ -64,15 +65,32 @@ object Histograms {
       val pretty = for {
         (k, v) <- result
       } yield {
-        (k, HistogramDefinition(v("kind").get.asInstanceOf[String],
-                                v.getOrElse("keyed", Some(false)).get.asInstanceOf[Boolean],
-                                v.getOrElse("n_values", None).asInstanceOf[Option[Int]],
-                                v.getOrElse("low", None).asInstanceOf[Option[Int]],
-                                v.getOrElse("high", None).asInstanceOf[Option[Int]],
-                                v.getOrElse("n_buckets", None).asInstanceOf[Option[Int]]))
+        val kind = v("kind").get.asInstanceOf[String]
+        val keyed = v.getOrElse("keyed", Some(false)).get.asInstanceOf[Boolean]
+        val nValues = v.getOrElse("n_values", None).asInstanceOf[Option[Int]]
+        val low = v.getOrElse("low", Some(0)).get.asInstanceOf[Int]
+        val high = v.getOrElse("high", None).asInstanceOf[Option[Int]]
+        val nBuckets = v.getOrElse("n_buckets", None).asInstanceOf[Option[Int]]
+
+        (kind, nValues, high, nBuckets) match {
+          case ("flag", _, _, _) =>
+            Some((k, FlagHistogram(keyed)))
+          case ("boolean", _, _ , _) =>
+            Some((k, BooleanHistogram(keyed)))
+          case ("count", _, _, _) =>
+            Some((k, CountHistogram(keyed)))
+          case ("enumerated", Some(nValues), _, _) =>
+            Some((k, EnumeratedHistogram(keyed, nValues)))
+          case ("linear", _, Some(high), Some(nBuckets)) =>
+            Some((k, LinearHistogram(keyed, low, high, nBuckets)))
+          case ("exponential", _, Some(high), Some(nBuckets)) =>
+            Some((k, ExponentialHistogram(keyed, low, high, nBuckets)))
+          case _ =>
+            None
+        }
       }
 
-      (key, pretty)
+      (key, pretty.flatten.toMap)
     }
 
     // Histograms are considered to be immutable so it's OK to merge their definitions
