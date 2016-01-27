@@ -186,7 +186,8 @@ case class Longitudinal() extends DerivedStream {
             val values = Array.fill(buckets.length){0L}
             h.values.foreach{ case (key, value) =>
               val index = buckets.indexOf(key.toInt)
-              values(index) = value
+              if (index != -1)
+                values(index) = value
             }
 
             val record = new GenericData.Record(histogramSchema)
@@ -210,7 +211,8 @@ case class Longitudinal() extends DerivedStream {
             val values = Array.fill(buckets.length){0L}
             h.values.foreach{ case (key, value) =>
               val index = buckets.indexOf(key.toInt)
-              values(index) = value
+              if (index != -1)
+                values(index) = value
             }
 
             val record = new GenericData.Record(histogramSchema)
