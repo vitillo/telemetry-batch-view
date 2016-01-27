@@ -92,4 +92,15 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
       }
     }
   }
+
+  "Linear histograms" must "be stored correctly" in {
+    val records = fixture.record.get("GC_BUDGET_MS").asInstanceOf[Array[Record]].toList
+    assert(records.length == fixture.payloads.length)
+
+    val reference = Array(0L, 42L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L)
+    records.foreach{ x =>
+      assert(x.get("sum") == 42L)
+      assert(x.get("values").asInstanceOf[Array[Long]].toList == reference.toList)
+    }
+  }
 }

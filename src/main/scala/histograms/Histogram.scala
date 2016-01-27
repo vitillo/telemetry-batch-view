@@ -68,7 +68,7 @@ object Histograms {
         val kind = v("kind").get.asInstanceOf[String]
         val keyed = v.getOrElse("keyed", Some(false)).get.asInstanceOf[Boolean]
         val nValues = v.getOrElse("n_values", None).asInstanceOf[Option[Int]]
-        val low = v.getOrElse("low", Some(0)).get.asInstanceOf[Int]
+        val low = v.getOrElse("low", Some(1)).get.asInstanceOf[Int]
         val high = v.getOrElse("high", None).asInstanceOf[Option[Int]]
         val nBuckets = v.getOrElse("n_buckets", None).asInstanceOf[Option[Int]]
 
