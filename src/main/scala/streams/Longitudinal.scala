@@ -105,9 +105,9 @@ case class Longitudinal() extends DerivedStream {
         case h: EnumeratedHistogram =>
           builder.name(key).`type`().optional().array().items().map().values().array().items().longType()
         case h: BooleanHistogram if h.keyed == false =>
-          builder.name(key).`type`().optional().array().items(histogramType)
+          builder.name(key).`type`().optional().array().items().array().items().longType()
         case h: BooleanHistogram =>
-          builder.name(key).`type`().optional().array().items().map().values(histogramType)
+          builder.name(key).`type`().optional().array().items().map().values().array().items().longType()
         case h: LinearHistogram if h.keyed == false =>
           builder.name(key).`type`().optional().array().items(histogramType)
         case h: LinearHistogram =>
@@ -164,24 +164,8 @@ case class Longitudinal() extends DerivedStream {
           root.set(key, vectorizeHistograms(histogramsList, key, h => h.values("0") > 0, false))
 
         case _: BooleanHistogram =>
-          def build(h: RawHistogram): GenericData.Record = {
-            val record = new GenericData.Record(histogramSchema)
-            val values = Array(h.values.getOrElse("0", 0L), h.values.getOrElse("1", 0L))
-            val sum = h.sum
-
-            record.put("values", values)
-            record.put("sum", sum)
-            record
-          }
-
-          val empty = {
-            val record = new GenericData.Record(histogramSchema)
-            record.put("values", Array[Long](0L, 0L))
-            record.put("sum", 0)
-            record
-          }
-
-          root.set(key, vectorizeHistograms(histogramsList, key, build, empty))
+          def build(h: RawHistogram): Array[Long] = Array(h.values.getOrElse("0", 0L), h.values.getOrElse("1", 0L))
+          root.set(key, vectorizeHistograms(histogramsList, key, build, Array(0L, 0L)))
 
         case _: CountHistogram =>
           root.set(key, vectorizeHistograms(histogramsList, key, h => h.values.getOrElse("0", 0L), 0L))
