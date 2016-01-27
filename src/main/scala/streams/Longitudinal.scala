@@ -3,22 +3,21 @@ package telemetry.streams
 import awscala._
 import awscala.s3._
 import org.apache.avro.{Schema, SchemaBuilder}
-import org.apache.avro.generic.{GenericRecord, GenericData, GenericRecordBuilder}
+import org.apache.avro.generic.{GenericData, GenericRecord, GenericRecordBuilder}
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
+import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
+import scala.math.max
+import scala.reflect.ClassTag
 import telemetry.{DerivedStream, ObjectSummary}
 import telemetry.DerivedStream.s3
 import telemetry.heka.{HekaFrame, Message}
-import telemetry.parquet.ParquetFile
 import telemetry.histograms._
-import scala.util.Random
-import collection.JavaConversions._
-import scala.math.max
-import scala.collection.mutable.ListBuffer
-import scala.reflect.ClassTag
+import telemetry.parquet.ParquetFile
 
 case class Longitudinal() extends DerivedStream {
   override def streamName: String = "telemetry-release"
