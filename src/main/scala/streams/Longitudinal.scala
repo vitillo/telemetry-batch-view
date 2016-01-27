@@ -140,11 +140,31 @@ case class Longitudinal() extends DerivedStream {
     buffer.toArray
   }
 
+  private def buildKeyedHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
+    implicit val formats = DefaultFormats
+
+    val histogramsList = payloads.map{ case (x) =>
+      val json = x.getOrElse("payload.keyedHistograms", return).asInstanceOf[String]
+      parse(json).extract[Map[String, Map[String, RawHistogram]]]
+    }
+
+    val uniqueKeys = histogramsList.flatMap(x => x.keys).distinct.toSet
+
+    val validKeys = for {
+      key <- uniqueKeys
+      definition <- Histograms.definitions.get(key)
+    } yield (key, definition)
+
+    val histogramSchema = schema.getField("GC_MS").schema().getTypes()(1).getElementType()
+
+    // Support only keyed scalar metrics for now?
+  }
+
   private def buildHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
     implicit val formats = DefaultFormats
 
     val histogramsList = payloads.map{ case (x) =>
-      val json = x("payload.histograms").asInstanceOf[String]
+      val json = x.getOrElse("payload.histograms", return).asInstanceOf[String]
       parse(json).extract[Map[String, RawHistogram]]
     }
 
@@ -173,7 +193,12 @@ case class Longitudinal() extends DerivedStream {
           def build(h: RawHistogram): Array[Long] = {
             val values = Array.fill(definition.nValues + 1){0L}
             h.values.foreach{case (key, value) =>
-              values(key.toInt) = value
+              try {
+                values(key.toInt) = value
+              } catch {
+                case _ =>
+                  // Ignore parsing errors
+              }
             }
             values
           }
@@ -185,9 +210,13 @@ case class Longitudinal() extends DerivedStream {
           def build(h: RawHistogram): GenericData.Record = {
             val values = Array.fill(buckets.length){0L}
             h.values.foreach{ case (key, value) =>
-              val index = buckets.indexOf(key.toInt)
-              if (index != -1)
+              try {
+                val index = buckets.indexOf(key.toInt)
                 values(index) = value
+              } catch {
+                case _ =>
+                  // Ignore parsing errors
+              }
             }
 
             val record = new GenericData.Record(histogramSchema)
@@ -210,9 +239,13 @@ case class Longitudinal() extends DerivedStream {
           def build(h: RawHistogram): GenericData.Record = {
             val values = Array.fill(buckets.length){0L}
             h.values.foreach{ case (key, value) =>
-              val index = buckets.indexOf(key.toInt)
-              if (index != -1)
+              try {
+                val index = buckets.indexOf(key.toInt)
                 values(index) = value
+              }catch {
+                case _ =>
+                  // Ignore parsing errors
+              }
             }
 
             val record = new GenericData.Record(histogramSchema)
