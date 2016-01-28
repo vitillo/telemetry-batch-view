@@ -48,6 +48,10 @@ object Histograms {
             case ("n_values", JInt(v)) => Some(v.toInt)
             case ("kind", JString(v)) => Some(v)
             case ("keyed", JBool(v)) => Some(v)
+            case ("keyed", JString(v)) => v match {
+              case "true" => Some(true)
+              case _ => Some(false)
+            }
             case _ => None
           }
         } catch {

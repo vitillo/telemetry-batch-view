@@ -9,6 +9,7 @@ import org.apache.avro.generic.{GenericRecord, GenericData, GenericRecordBuilder
 import org.apache.avro.generic.GenericData.Record
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
+import telemetry.parquet.ParquetFile
 
 class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
   def fixture = {
@@ -67,7 +68,12 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     }
   }
 
-  "Top-level measurements" must "be stored correctly" in {
+
+  "Records" can "be serialized" in {
+    ParquetFile.serialize(List(fixture.record).toIterator, fixture.schema)
+  }
+
+   "Top-level measurements" must "be stored correctly" in {
     assert(fixture.record.get("clientId") == fixture.payloads(0)("clientId"))
     assert(fixture.record.get("os") == fixture.payloads(0)("os"))
   }
