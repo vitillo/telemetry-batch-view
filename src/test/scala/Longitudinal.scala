@@ -14,6 +14,7 @@ import telemetry.parquet.ParquetFile
 class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
   def fixture = {
     def createPayload(creationTimestamp: Double): Map[String, Any] = {
+      // TODO: Use Scala Map and List directly?
       val histograms =
         ("TELEMETRY_TEST_FLAG" ->
            ("values" -> ("0" -> 1) ~ ("1" -> 0)) ~
@@ -48,12 +49,29 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
               ("values" -> ("1" -> 42)) ~
               ("sum" -> 42)))
 
+      val system =
+          ("cpu" ->
+             ("count" -> 4)) ~
+          ("os" ->
+             ("name" -> "Windows_NT") ~
+             ("locale" -> "en_US") ~
+             ("version" -> "6.1")) ~
+          ("hdd" ->
+             ("profile" ->
+                ("revision" -> "12345") ~
+                ("model" -> "SAMSUNG X"))) ~
+          ("gfx" ->
+             ("adapters" -> List(
+                ("RAM" -> 1024) ~ ("description" -> "FOO") ~ ("deviceID" -> "1") ~ ("vendorID" -> "Vendor") ~ ("GPUActive" -> true),
+                ("RAM" -> 1024) ~ ("description" -> "FOO") ~ ("deviceID" -> "1") ~ ("vendorID" -> "Vendor") ~ ("GPUActive" -> true)
+              )))
 
       Map("clientId" -> "26c9d181-b95b-4af5-bb35-84ebf0da795d",
           "creationTimestamp" -> creationTimestamp,
           "os" -> "Windows_NT",
           "payload.histograms" -> compact(render(histograms)),
-          "payload.keyedHistograms" -> compact(render(keyedHistograms)))
+          "payload.keyedHistograms" -> compact(render(keyedHistograms)),
+          "environment.system" -> compact(render(system)))
     }
 
     new {
