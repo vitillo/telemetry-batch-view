@@ -66,12 +66,20 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
                 ("RAM" -> 1024) ~ ("description" -> "FOO") ~ ("deviceID" -> "1") ~ ("vendorID" -> "Vendor") ~ ("GPUActive" -> true)
               )))
 
+      val settings =
+        ("e10sEnabled" -> true)
+
+      val build =
+        ("buildId" -> "20160101001100")
+
       Map("clientId" -> "26c9d181-b95b-4af5-bb35-84ebf0da795d",
           "creationTimestamp" -> creationTimestamp,
           "os" -> "Windows_NT",
           "payload.histograms" -> compact(render(histograms)),
           "payload.keyedHistograms" -> compact(render(keyedHistograms)),
-          "environment.system" -> compact(render(system)))
+          "environment.system" -> compact(render(system)),
+          "environment.settings" -> compact(render(settings)),
+          "environment.build" -> compact(render(build)))
     }
 
     new {
@@ -97,6 +105,24 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     records.foreach{ x =>
       val record = x.asInstanceOf[Record]
       assert(record.get("cpu").asInstanceOf[Record].get("count") == 4)
+    }
+  }
+
+  "environment.settings" must "be converted correctly" in {
+    val records = fixture.record.get("settings").asInstanceOf[Array[Any]].toList
+    assert(records.length == fixture.payloads.length)
+    records.foreach{ x =>
+      val record = x.asInstanceOf[Record]
+      assert(record.get("e10sEnabled") == true)
+    }
+  }
+
+  "environment.build" must "be converted correctly" in {
+    val records = fixture.record.get("build").asInstanceOf[Array[Any]].toList
+    assert(records.length == fixture.payloads.length)
+    records.foreach{ x =>
+      val record = x.asInstanceOf[Record]
+      assert(record.get("buildId") == "20160101001100")
     }
   }
 

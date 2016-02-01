@@ -15,7 +15,7 @@ import scala.math.max
 import scala.reflect.ClassTag
 import telemetry.{DerivedStream, ObjectSummary}
 import telemetry.DerivedStream.s3
-import telemetry.avro.JSON2Avro
+import telemetry.avro
 import telemetry.heka.{HekaFrame, Message}
 import telemetry.histograms._
 import telemetry.parquet.ParquetFile
@@ -66,10 +66,35 @@ case class Longitudinal() extends DerivedStream {
   }
 
   private def buildSchema: Schema = {
+    // See https://github.com/SamPenrose/data-pipeline/blob/v4-baseset-schema/schemas/test/environment.schema.json
+    val buildType = SchemaBuilder
+      .record("build").fields()
+      .name("applicationId").`type`().optional().stringType()
+      .name("architecture").`type`().optional().stringType()
+      .name("architecturesInBinary").`type`().optional().stringType()
+      .name("buildId").`type`().optional().stringType()
+      .name("hotfixVersion").`type`().optional().stringType()
+      .name("version").`type`().optional().stringType()
+      .name("vendor").`type`().optional().stringType()
+      .name("platformVersion").`type`().optional().stringType()
+      .name("xpcomAbi").`type`().optional().stringType()
+      .endRecord()
+
+    val settingsType = SchemaBuilder
+      .record("settings").fields()
+      .name("blocklistEnabled").`type`().optional().booleanType()
+      .name("isDefaultBrowser").`type`().optional().booleanType()
+      .name("defaultSearchEngine").`type`().optional().booleanType()
+      .name("e10sEnabled").`type`().optional().booleanType()
+      .name("locale").`type`().optional().stringType()
+      .name("telemetryEnabled").`type`().optional().booleanType()
+      .endRecord()
+
     val systemType = SchemaBuilder
       .record("system").fields()
       .name("cpu").`type`().optional().record("cpu").fields()
         .name("count").`type`().optional().intType()
+        .name("cores").`type`().optional().intType()
         .endRecord()
       .name("os").`type`().optional().record("os").fields()
         .name("name").`type`().optional().stringType()
@@ -82,6 +107,8 @@ case class Longitudinal() extends DerivedStream {
           .name("model").`type`().optional().stringType()
           .endRecord()
         .endRecord()
+        .name("binary").`type`().optional().`type`("profile")
+        .name("system").`type`().optional().`type`("profile")
       .name("gfx").`type`().optional().record("gfx").fields()
         .name("adapters").`type`().optional().array().items().record("adapter").fields()
           .name("RAM").`type`().optional().intType()
@@ -91,23 +118,18 @@ case class Longitudinal() extends DerivedStream {
           .name("GPUActive").`type`().optional().booleanType()
          .endRecord()
       .endRecord()
+      .name("memoryMB").`type`().optional().intType()
     .endRecord()
 
     val builder = SchemaBuilder
       .record("Submission")
       .fields
       .name("clientId").`type`().stringType().noDefault()
-      .name("creationTimestamp").`type`().array().items().doubleType().noDefault()
       .name("os").`type`().stringType().noDefault()
-      .name("simpleMeasurements").`type`().array().items().stringType().noDefault()
-      .name("log").`type`().array().items().stringType().noDefault()
-      .name("info").`type`().array().items().stringType().noDefault()
-      .name("addonDetails").`type`().array().items().stringType().noDefault()
-      .name("settings").`type`().array().items().stringType().noDefault()
-      .name("profile").`type`().array().items().stringType().noDefault()
-      .name("build").`type`().array().items().stringType().noDefault()
-      .name("partner").`type`().array().items().stringType().noDefault()
+      .name("creationTimestamp").`type`().array().items().doubleType().noDefault()
       .name("system").`type`().optional().array().items(systemType)
+      .name("build").`type`().optional().array().items(buildType)
+      .name("settings").`type`().optional().array().items(settingsType)
 
     val histogramType = SchemaBuilder
       .record("Histogram")
@@ -242,22 +264,26 @@ case class Longitudinal() extends DerivedStream {
         vectorizeHistogram_(name, payloads, flatten, empty)
     }
 
-  private def buildSystem(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
+  private def JSON2Avro(jsonField: String,
+                        avroField: String,
+                        payloads: List[Map[String, Any]],
+                        root: GenericRecordBuilder,
+                        schema: Schema) {
     implicit val formats = DefaultFormats
 
     val records = payloads.map{ case (x) =>
-      parse(x.getOrElse("environment.system", return).asInstanceOf[String])
+      parse(x.getOrElse(jsonField, return).asInstanceOf[String])
     }
 
-    val systemSchema = schema.getField("system").schema().getTypes()(1).getElementType()
-    val system = records.map{ case (x) =>
-      JSON2Avro.parse(systemSchema, x)
+    val fieldSchema = schema.getField(avroField).schema().getTypes()(1).getElementType()
+    val field = records.map{ case (x) =>
+      avro.JSON2Avro.parse(fieldSchema, x)
     }
 
-    root.set("system", system.flatten.toArray)
+    root.set(avroField, field.flatten.toArray)
   }
 
-  private def buildKeyedHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
+  private def keyedHistograms2Avro(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
     implicit val formats = DefaultFormats
 
     val histogramsList = payloads.map{ case (x) =>
@@ -293,7 +319,7 @@ case class Longitudinal() extends DerivedStream {
     }
   }
 
-  private def buildHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
+  private def histograms2Avro(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
     implicit val formats = DefaultFormats
 
     val histogramsList = payloads.map{ case (x) =>
@@ -332,19 +358,13 @@ case class Longitudinal() extends DerivedStream {
       .set("clientId", sorted(0)("clientId").asInstanceOf[String])
       .set("os", sorted(0)("os").asInstanceOf[String])
       .set("creationTimestamp", sorted.map(x => x("creationTimestamp").asInstanceOf[Double]).toArray)
-      .set("simpleMeasurements", sorted.map(x => x.getOrElse("payload.simpleMeasurements", "").asInstanceOf[String]).toArray)
-      .set("log", sorted.map(x => x.getOrElse("payload.log", "").asInstanceOf[String]).toArray)
-      .set("info", sorted.map(x => x.getOrElse("payload.info", "").asInstanceOf[String]).toArray)
-      .set("addonDetails", sorted.map(x => x.getOrElse("payload.addonDetails", "").asInstanceOf[String]).toArray)
-      .set("settings", sorted.map(x => x.getOrElse("environment.settings", "").asInstanceOf[String]).toArray)
-      .set("profile", sorted.map(x => x.getOrElse("environment.profile", "").asInstanceOf[String]).toArray)
-      .set("build", sorted.map(x => x.getOrElse("environment.build", "").asInstanceOf[String]).toArray)
-      .set("partner", sorted.map(x => x.getOrElse("environment.partner", "").asInstanceOf[String]).toArray)
 
     try {
-      buildSystem(sorted, root, schema)
-      buildKeyedHistograms(sorted, root, schema)
-      buildHistograms(sorted, root, schema)
+      JSON2Avro("environment.system", "system", sorted, root, schema)
+      JSON2Avro("environment.settings", "settings", sorted, root, schema)
+      JSON2Avro("environment.build", "build", sorted, root, schema)
+      keyedHistograms2Avro(sorted, root, schema)
+      histograms2Avro(sorted, root, schema)
     } catch {
       case _ : Throwable =>
         // Ignore buggy clients
