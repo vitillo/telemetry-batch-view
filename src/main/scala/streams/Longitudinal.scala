@@ -15,6 +15,7 @@ import scala.math.max
 import scala.reflect.ClassTag
 import telemetry.{DerivedStream, ObjectSummary}
 import telemetry.DerivedStream.s3
+import telemetry.avro.JSON2Avro
 import telemetry.heka.{HekaFrame, Message}
 import telemetry.histograms._
 import telemetry.parquet.ParquetFile
@@ -115,7 +116,6 @@ case class Longitudinal() extends DerivedStream {
       .name("sum").`type`().longType().noDefault()
       .endRecord()
 
-    // TODO: add description to histograms
     Histograms.definitions.foreach{ case (key, value) =>
       value match {
         case h: FlagHistogram if h.keyed == false =>
@@ -150,16 +150,15 @@ case class Longitudinal() extends DerivedStream {
     builder.endRecord()
   }
 
-
-  private def vectorizeHistograms_[T:ClassTag](payloads: List[Map[String, RawHistogram]],
-                                              name: String,
-                                              builder: RawHistogram => T,
+  private def vectorizeHistogram_[T:ClassTag](name: String,
+                                              payloads: List[Map[String, RawHistogram]],
+                                              flatten: RawHistogram => T,
                                               default: T): Array[T] = {
     val buffer = ListBuffer[T]()
     for (histograms <- payloads) {
       histograms.get(name) match {
         case Some(histogram) =>
-          buffer += builder(histogram)
+          buffer += flatten(histogram)
         case None =>
           buffer += default
       }
@@ -167,23 +166,23 @@ case class Longitudinal() extends DerivedStream {
     buffer.toArray
   }
 
-  private def vectorizeHistograms[T:ClassTag](name: String,
-                                               definition: HistogramDefinition,
-                                               payloads: List[Map[String, RawHistogram]],
-                                               histogramSchema: Schema): Array[Any] =
+  private def vectorizeHistogram[T:ClassTag](name: String,
+                                             definition: HistogramDefinition,
+                                             payloads: List[Map[String, RawHistogram]],
+                                             histogramSchema: Schema): Array[Any] =
     definition match {
       case _: FlagHistogram =>
-        vectorizeHistograms_(payloads, name, h => h.values("0") > 0, false)
+        vectorizeHistogram_(name, payloads, h => h.values("0") > 0, false)
 
       case _: BooleanHistogram =>
-        def build(h: RawHistogram): Array[Long] = Array(h.values.getOrElse("0", 0L), h.values.getOrElse("1", 0L))
-        vectorizeHistograms_(payloads, name, build, Array(0L, 0L))
+        def flatten(h: RawHistogram): Array[Long] = Array(h.values.getOrElse("0", 0L), h.values.getOrElse("1", 0L))
+        vectorizeHistogram_(name, payloads, flatten, Array(0L, 0L))
 
       case _: CountHistogram =>
-        vectorizeHistograms_(payloads, name, h => h.values.getOrElse("0", 0L), 0L)
+        vectorizeHistogram_(name, payloads, h => h.values.getOrElse("0", 0L), 0L)
 
       case definition: EnumeratedHistogram =>
-        def build(h: RawHistogram): Array[Long] = {
+        def flatten(h: RawHistogram): Array[Long] = {
           val values = Array.fill(definition.nValues + 1){0L}
           h.values.foreach{case (key, value) =>
             values(key.toInt) = value
@@ -191,12 +190,12 @@ case class Longitudinal() extends DerivedStream {
           values
         }
 
-        vectorizeHistograms_(payloads, name, build, Array.fill(definition.nValues + 1){0L})
+        vectorizeHistogram_(name, payloads, flatten, Array.fill(definition.nValues + 1){0L})
 
       case definition: LinearHistogram =>
         val buckets = Histograms.linearBuckets(definition.low, definition.high, definition.nBuckets)
 
-        def build(h: RawHistogram): GenericData.Record = {
+        def flatten(h: RawHistogram): GenericData.Record = {
           val values = Array.fill(buckets.length){0L}
           h.values.foreach{ case (key, value) =>
             val index = buckets.indexOf(key.toInt)
@@ -216,11 +215,11 @@ case class Longitudinal() extends DerivedStream {
           record
         }
 
-        vectorizeHistograms_(payloads, name, build, empty)
+        vectorizeHistogram_(name, payloads, flatten, empty)
 
       case definition: ExponentialHistogram =>
         val buckets = Histograms.exponentialBuckets(definition.low, definition.high, definition.nBuckets)
-        def build(h: RawHistogram): GenericData.Record = {
+        def flatten(h: RawHistogram): GenericData.Record = {
           val values = Array.fill(buckets.length){0L}
           h.values.foreach{ case (key, value) =>
             val index = buckets.indexOf(key.toInt)
@@ -240,113 +239,22 @@ case class Longitudinal() extends DerivedStream {
           record
         }
 
-        vectorizeHistograms_(payloads, name, build, empty)
+        vectorizeHistogram_(name, payloads, flatten, empty)
     }
 
   private def buildSystem(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
+    implicit val formats = DefaultFormats
+
     val records = payloads.map{ case (x) =>
       parse(x.getOrElse("environment.system", return).asInstanceOf[String])
     }
 
     val systemSchema = schema.getField("system").schema().getTypes()(1).getElementType()
-    val cpuSchema = systemSchema.getField("cpu").schema().getTypes()(1)
-    val osSchema = systemSchema.getField("os").schema().getTypes()(1)
-    val hddSchema = systemSchema.getField("hdd").schema().getTypes()(1)
-    val hddProfileSchema = hddSchema.getField("profile").schema().getTypes()(1)
-    val gfxSchema = systemSchema.getField("gfx").schema().getTypes()(1)
-
-    val cpu = records.map{ case (x) =>
-      val count = x \ "cpu" \ "count"
-      val record = new GenericData.Record(cpuSchema)
-
-      count match {
-        case JInt(count) =>
-          record.put("count", count)
-        case _ =>
-      }
-
-      record
+    val system = records.map{ case (x) =>
+      JSON2Avro.parse(systemSchema, x)
     }
 
-    val os = records.map{ case (x) =>
-      val os = x \ "os"
-      val name = os \ "name"
-      val locale = os \ "locale"
-      val version = os \ "version"
-      val record = new GenericData.Record(osSchema)
-
-      (name, locale, version) match {
-        case (JString(name), JString(locale), JString(version)) =>
-          record.put("name", name)
-          record.put("locale", locale)
-          record.put("version", version)
-
-        case _ =>
-      }
-
-      record
-    }
-
-    val hdd = records.map{ case (x) =>
-      val profile = x \ "hdd" \ "profile"
-      val revision = profile \ "revision"
-      val model = profile \ "model"
-      val record = new GenericData.Record(hddSchema)
-
-      (revision, model) match {
-        case (JString(revision), JString(model)) =>
-          val profileRecord = new GenericData.Record(hddProfileSchema)
-          profileRecord.put("revision", revision)
-          profileRecord.put("model", model)
-          record.put("profile", profileRecord)
-        case _ =>
-      }
-
-      record
-    }
-
-    val gfx = records.map{ case (x) =>
-      val JArray(tmp) = x \ "gfx" \ "adapters"
-
-      val adapters = tmp.map{ adapter =>
-        val ram = adapter \ "RAM"
-        val description = adapter \ "description"
-        val deviceID = adapter \ "deviceID"
-        val vendorID = adapter \ "vendorID"
-        val active = adapter \ "GPUActive"
-
-        val adapterSchema = gfxSchema.getField("adapters").schema().getTypes()(1).getElementType()
-        val record = new GenericData.Record(adapterSchema)
-
-        (ram, description, deviceID, vendorID, active) match {
-          case (JInt(ram), JString(description), JString(deviceID), JString(vendorID), JBool(active)) =>
-            record.put("RAM", ram)
-            record.put("description", description)
-            record.put("deviceID", deviceID)
-            record.put("vendorID", vendorID)
-            record.put("GPUActive", active)
-          case _ =>
-        }
-        record
-      }.toArray
-
-      val record = new GenericData.Record(gfxSchema)
-      record.put("adapters", adapters)
-      record
-    }
-
-    val system = for {
-      i <- 0 until records.length
-    } yield {
-      val record = new GenericData.Record(systemSchema)
-      record.put("cpu", cpu(i))
-      record.put("os", os(i))
-      record.put("hdd", hdd(i))
-      record.put("gfx", gfx(i))
-      record
-    }
-
-    root.set("system", system.toArray)
+    root.set("system", system.flatten.toArray)
   }
 
   private def buildKeyedHistograms(payloads: List[Map[String, Any]], root: GenericRecordBuilder, schema: Schema) {
@@ -375,10 +283,10 @@ case class Longitudinal() extends DerivedStream {
       }
 
       val uniqueLabels = keyedHistogramsList.flatMap(x => x.keys).distinct.toSet
-      val vector = vectorizeHistograms(key, value, keyedHistogramsList, histogramSchema)
+      val vector = vectorizeHistogram(key, value, keyedHistogramsList, histogramSchema)
       val vectorized = for {
         label <- uniqueLabels
-        vector = vectorizeHistograms(label, value, keyedHistogramsList, histogramSchema)
+        vector = vectorizeHistogram(label, value, keyedHistogramsList, histogramSchema)
       } yield (label, vector)
 
       root.set(key, vectorized.toMap.asJava)
@@ -403,7 +311,7 @@ case class Longitudinal() extends DerivedStream {
     val histogramSchema = schema.getField("GC_MS").schema().getTypes()(1).getElementType()
 
     for ((key, value) <- validKeys) {
-      root.set(key, vectorizeHistograms(key, value, histogramsList, histogramSchema))
+      root.set(key, vectorizeHistogram(key, value, histogramsList, histogramSchema))
     }
   }
 

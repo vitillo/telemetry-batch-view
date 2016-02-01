@@ -91,36 +91,45 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     ParquetFile.serialize(List(fixture.record).toIterator, fixture.schema)
   }
 
-   "Top-level measurements" must "be stored correctly" in {
+  "environment.system" must "be converted correctly" in {
+    val records = fixture.record.get("system").asInstanceOf[Array[Any]].toList
+    assert(records.length == fixture.payloads.length)
+    records.foreach{ x =>
+      val record = x.asInstanceOf[Record]
+      assert(record.get("cpu").asInstanceOf[Record].get("count") == 4)
+    }
+  }
+
+   "Top-level measurements" must "be converted correctly" in {
     assert(fixture.record.get("clientId") == fixture.payloads(0)("clientId"))
     assert(fixture.record.get("os") == fixture.payloads(0)("os"))
   }
 
-  "creationTimestamp" must "be stored correctly" in {
+  "creationTimestamp" must "be converted correctly" in {
     val creationTimestamps = fixture.record.get("creationTimestamp").asInstanceOf[Array[Double]].toList
     assert(creationTimestamps.length == fixture.payloads.length)
     creationTimestamps.zip(fixture.payloads.map(_("creationTimestamp"))).foreach{case (x, y) => assert(x == y)}
   }
 
-  "Flag histograms" must "be stored correctly" in {
+  "Flag histograms" must "be converted correctly" in {
     val histograms = fixture.record.get("TELEMETRY_TEST_FLAG").asInstanceOf[Array[Any]].toList
     assert(histograms.length == fixture.payloads.length)
     histograms.zip(Stream.continually(true)).foreach{case (x, y) => assert(x == y)}
   }
 
-  "Boolean histograms" must "be stored correctly" in {
+  "Boolean histograms" must "be converted correctly" in {
     val histograms = fixture.record.get("DEVTOOLS_TOOLBOX_OPENED_BOOLEAN").asInstanceOf[Array[Any]].toList
     assert(histograms.length == fixture.payloads.length)
     histograms.foreach(h => assert(h.asInstanceOf[Array[Long]].toList == List(42L, 0L)))
   }
 
-  "Count histograms" must "be stored correctly" in {
+  "Count histograms" must "be converted correctly" in {
     val histograms = fixture.record.get("UPDATE_CHECK_NO_UPDATE_EXTERNAL").asInstanceOf[Array[Any]].toList
     assert(histograms.length == fixture.payloads.length)
     histograms.zip(Stream.continually(42)).foreach{case (x, y) => assert(x== y)}
   }
 
-  "Enumerated histograms" must "be stored correctly" in {
+  "Enumerated histograms" must "be converted correctly" in {
     val histograms = fixture.record.get("PLACES_BACKUPS_DAYSFROMLAST").asInstanceOf[Array[Any]]
     assert(histograms.length == fixture.payloads.length)
     for(h <- histograms) {
@@ -136,7 +145,7 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     }
   }
 
-  "Linear histograms" must "be stored correctly" in {
+  "Linear histograms" must "be converted correctly" in {
     val records = fixture.record.get("GC_BUDGET_MS").asInstanceOf[Array[Any]].toList
     assert(records.length == fixture.payloads.length)
 
@@ -148,7 +157,7 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     }
   }
 
-  "Exponential histograms" must "be stored correctly" in {
+  "Exponential histograms" must "be converted correctly" in {
     val records = fixture.record.get("GC_MS").asInstanceOf[Array[Any]].toList
     assert(records.length == fixture.payloads.length)
 
@@ -162,7 +171,7 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     }
   }
 
-  "Keyed enumerated histograms" must "be stored correctly" in {
+  "Keyed enumerated histograms" must "be converted correctly" in {
     // Keyed boolean histograms follow a similar structure
     val records = fixture.record.get("ADDON_SHIM_USAGE").asInstanceOf[java.util.Map[String, Array[Any]]].asScala
     assert(records.size == 1)
@@ -180,7 +189,7 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     }
   }
 
-  "Keyed count histograms" must "be stored correctly" in {
+  "Keyed count histograms" must "be converted correctly" in {
     // Keyed flag histograms follow a similar structure
     val searchCounts = fixture.record.get("SEARCH_COUNTS").asInstanceOf[java.util.Map[String, Array[Any]]].asScala
     assert(searchCounts.size == 1)
@@ -191,7 +200,7 @@ class LongitudinalTest extends FlatSpec with Matchers with PrivateMethodTester{
     histograms.zip(Stream.continually(42)).foreach{case (x, y) => assert(x== y)}
   }
 
-  "Keyed exponential histograms" must "be stored correctly" in {
+  "Keyed exponential histograms" must "be converted correctly" in {
     // Keyed linear histograms follow a similar structure
     val records = fixture.record.get("DEVTOOLS_PERFTOOLS_SELECTED_VIEW_MS").asInstanceOf[java.util.Map[String, Array[Any]]].asScala
     assert(records.size == 1)
