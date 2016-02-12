@@ -47,7 +47,6 @@ case class Longitudinal() extends DerivedStream {
           case _ => Nil
         }}
       .groupByKey()
-      .coalesce(max((0.5*sc.defaultParallelism).toInt, 1), true)  // see https://issues.apache.org/jira/browse/PARQUET-222
 
     val partitionCounts = clientMessages
       .values

@@ -29,7 +29,7 @@ object ParquetFile {
   }
 
   def serialize(data: Iterator[GenericRecord], schema: Schema): Path = {
-    val blockSize = ParquetWriter.DEFAULT_BLOCK_SIZE
+    val blockSize = 8*ParquetWriter.DEFAULT_BLOCK_SIZE
     val pageSize = ParquetWriter.DEFAULT_PAGE_SIZE
     val enableDict = ParquetWriter.DEFAULT_IS_DICTIONARY_ENABLED
     val parquetFile = temporaryFileName()
