@@ -2,9 +2,10 @@ package telemetry.streams
 
 import awscala._
 import awscala.s3._
+import java.util.zip.CRC32
 import org.apache.avro.{Schema, SchemaBuilder}
 import org.apache.avro.generic.{GenericData, GenericRecord, GenericRecordBuilder}
-import org.apache.spark.SparkContext
+import org.apache.spark.{SparkContext, Partitioner}
 import org.apache.spark.rdd.RDD
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
@@ -19,6 +20,53 @@ import telemetry.avro
 import telemetry.heka.{HekaFrame, Message}
 import telemetry.histograms._
 import telemetry.parquet.ParquetFile
+
+private class ClientIdPartitioner(size: Int) extends Partitioner{
+  def numPartitions: Int = size
+  def getPartition(key: Any): Int = key match {
+    case (clientId: String, startDate: String, counter: Int) => hash(clientId)
+    case _ => throw new Exception("Invalid key")
+  }
+  private def hash(x: String): Int = {
+    val tmp = new CRC32()
+    tmp.update(x.getBytes)
+    (tmp.getValue % size).toInt
+  }
+}
+
+class ClientIterator(it: Iterator[Tuple2[String, Map[String, Any]]]) extends Iterator[List[Map[String, Any]]]{
+  var buffer = ListBuffer[Map[String, Any]]()
+  var currentKey =
+    if (it.hasNext) {
+      val (key, value) = it.next()
+      buffer += value
+      key
+    } else {
+      null
+    }
+
+  override def hasNext() = !buffer.isEmpty
+
+  override def next(): List[Map[String, Any]] = {
+    while (it.hasNext) {
+      val (key, value) = it.next()
+
+      if (key == currentKey) {
+        buffer += value
+      } else {
+        val result = buffer.toList
+        buffer.clear
+        buffer += value
+        currentKey = key
+        return result
+      }
+    }
+
+    val result = buffer.toList
+    buffer.clear
+    result
+  }
+}
 
 case class Longitudinal() extends DerivedStream {
   override def streamName: String = "telemetry-release"
@@ -40,19 +88,29 @@ case class Longitudinal() extends DerivedStream {
         for (message <- HekaFrame.parse(hekaFile.getObjectContent(), hekaFile.getKey()))  yield message }
       .flatMap{ case message =>
         val fields = HekaFrame.fields(message)
-        val clientId = fields.get("clientId")
+        for {
+          clientId <- fields.get("clientId") match {
+            case Some(x: String) => Some(x)
+            case _ => None
+          }
 
-        clientId match {
-          case Some(client: String) => List((client, fields))
-          case _ => Nil
-        }}
-      .groupByKey()
-      .coalesce(max((0.5*sc.defaultParallelism).toInt, 1), true)  // see https://issues.apache.org/jira/browse/PARQUET-222
+          json <- fields.get("payload.info")
+          info = parse(json.asInstanceOf[String])
+          tmp = for {
+            JString(startDate) <- info \ "subsessionStartDate"
+            JInt(counter) <- info \ "profileSubsessionCounter"
+          } yield (startDate, counter)
+          (startDate, counter) <- tmp.headOption
+        } yield ((clientId, startDate, counter.toInt), fields)
+      }
+      .repartitionAndSortWithinPartitions(new ClientIdPartitioner(5))
+      .map{case (key, value) => (key._1, value)}
 
     val partitionCounts = clientMessages
-      .values
-      .mapPartitions{ case clientIterator =>
+      .mapPartitions{ case it =>
+        val clientIterator = new ClientIterator(it)
         val schema = buildSchema
+
         val allRecords = for {
           client <- clientIterator
           record = buildRecord(client, schema)
