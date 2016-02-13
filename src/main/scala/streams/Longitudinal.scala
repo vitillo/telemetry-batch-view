@@ -103,7 +103,7 @@ case class Longitudinal() extends DerivedStream {
           (startDate, counter) <- tmp.headOption
         } yield ((clientId, startDate, counter.toInt), fields)
       }
-      .repartitionAndSortWithinPartitions(new ClientIdPartitioner(5))
+      .repartitionAndSortWithinPartitions(new ClientIdPartitioner(320))
       .map{case (key, value) => (key._1, value)}
 
     val partitionCounts = clientMessages
