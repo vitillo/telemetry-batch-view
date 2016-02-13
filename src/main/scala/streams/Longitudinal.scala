@@ -46,7 +46,7 @@ case class Longitudinal() extends DerivedStream {
           case Some(client: String) => List((client, fields))
           case _ => Nil
         }}
-      .groupByKey()
+      .groupByKey(320)
 
     val partitionCounts = clientMessages
       .values
@@ -654,7 +654,9 @@ case class Longitudinal() extends DerivedStream {
         case None =>
           None // Ignore clients with missing info object in payload
       }
-    }.sortBy( x => (x._2._1, x._2._2)).map(x => x._1)
+    }.sortBy( x => (x._2._1, x._2._2))(Ordering[(String, Int)].reverse)
+     .map(x => x._1)
+     .take(30000) // ~ 0.999 percentile over a 3 month period
 
     val root = new GenericRecordBuilder(schema)
       .set("clientId", sorted(0)("clientId").asInstanceOf[String])

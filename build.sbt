@@ -4,7 +4,7 @@ lazy val root = (project in file(".")).
   settings(
     name := "telemetry-batch-view",
     version := "1.1",
-    scalaVersion := "2.10.4",
+    scalaVersion := "2.10.6",
     retrieveManaged := true,
     ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) },
     libraryDependencies += "org.apache.avro" % "avro" % "1.7.7",
