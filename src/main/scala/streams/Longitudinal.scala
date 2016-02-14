@@ -12,7 +12,7 @@ import org.json4s.jackson.JsonMethods._
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
-import scala.math.max
+import scala.math.{max, abs}
 import scala.reflect.ClassTag
 import telemetry.{DerivedStream, ObjectSummary}
 import telemetry.DerivedStream.s3
@@ -24,13 +24,8 @@ import telemetry.parquet.ParquetFile
 private class ClientIdPartitioner(size: Int) extends Partitioner{
   def numPartitions: Int = size
   def getPartition(key: Any): Int = key match {
-    case (clientId: String, startDate: String, counter: Int) => hash(clientId)
+    case (clientId: String, startDate: String, counter: Int) => abs(clientId.hashCode) % size
     case _ => throw new Exception("Invalid key")
-  }
-  private def hash(x: String): Int = {
-    val tmp = new CRC32()
-    tmp.update(x.getBytes)
-    (tmp.getValue % size).toInt
   }
 }
 
