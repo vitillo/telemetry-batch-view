@@ -29,7 +29,7 @@ private class ClientIdPartitioner(size: Int) extends Partitioner{
   }
 }
 
-class ClientIterator(it: Iterator[Tuple2[String, Map[String, Any]]]) extends Iterator[List[Map[String, Any]]]{
+class ClientIterator(it: Iterator[Tuple2[String, Map[String, Any]]], maxHistorySize: Int = 1000) extends Iterator[List[Map[String, Any]]]{
   var buffer = ListBuffer[Map[String, Any]]()
   var currentKey =
     if (it.hasNext) {
@@ -46,7 +46,22 @@ class ClientIterator(it: Iterator[Tuple2[String, Map[String, Any]]]) extends Ite
     while (it.hasNext) {
       val (key, value) = it.next()
 
-      if (key == currentKey) {
+      if (key == currentKey && buffer.size == maxHistorySize) {
+        // Trim long histories
+        val result = buffer.toList
+        buffer.clear
+
+        // Fast forward to next client
+        while (it.hasNext) {
+          val (k, _) = it.next()
+          if (k != currentKey) {
+            buffer += value
+            return result
+          }
+        }
+
+        return result
+      } else if (key == currentKey){
         buffer += value
       } else {
         val result = buffer.toList
@@ -75,6 +90,8 @@ case class Longitudinal() extends DerivedStream {
       return
     }
 
+    // Sort submissions in descending order
+    implicit val ordering = Ordering[Tuple3[String, String, Int]].reverse
     val groups = DerivedStream.groupBySize(summaries.collect().toIterator)
     val clientMessages = sc.parallelize(groups, groups.size)
       .flatMap(x => x)
@@ -681,7 +698,7 @@ case class Longitudinal() extends DerivedStream {
 
   private def buildRecord(history: Iterable[Map[String, Any]], schema: Schema): Option[GenericRecord] = {
     // De-dupe records
-    val unique = history.foldLeft((List[Map[String, Any]](), Set[String]()))(
+    val sorted = history.foldLeft((List[Map[String, Any]](), Set[String]()))(
       { case ((submissions, seen), current) =>
         current.get("documentId") match {
           case Some(docId) =>
@@ -693,22 +710,6 @@ case class Longitudinal() extends DerivedStream {
             (submissions, seen) // Ignore clients with records that have a missing documentId
         }
       })._1
-
-    // Sort records by subsessionStartDate and profileSubsessionCounter
-    val sorted = unique.flatMap{x =>
-      x.get("payload.info") match {
-        case Some(body) =>
-          val info = parse(body.asInstanceOf[String])
-          (info \ "subsessionStartDate", info \ "profileSubsessionCounter") match {
-            case (JString(startDate), JInt(counter)) =>
-              Some(x, (startDate, counter.toInt))
-            case _ =>
-              None // Ignore 'unsortable' clients
-          }
-        case None =>
-          None // Ignore clients with missing info object in payload
-      }
-    }.sortBy( x => (x._2._1, x._2._2)).map(x => x._1)
 
     val root = new GenericRecordBuilder(schema)
       .set("clientId", sorted(0)("clientId").asInstanceOf[String])
